@@ -1,0 +1,148 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512); //Physical Add of SP
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1]; 			//System Call No from the Stack
+alias fileName S2;
+fileName = [physicalSP - 3]; //Arguement from the Stack
+
+if (sysCallNo == 9) then	//Exec System Call
+	alias fatEntry S3;
+	fatEntry = FAT;
+	while ([fatEntry] != fileName && fatEntry < DISK_LIST) do //Search FAT Table in Memory
+		fatEntry = fatEntry + 8;
+	endwhile;
+	if(fatEntry == DISK_LIST) then	//File not found in FAT return error code
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+	load(1,[fatEntry + 2]);	//Load the basic block of the new process in scratchpad
+	alias counter S4;	//Iterator variable
+	counter = 0;
+	alias nValidNo S5;	//Count of valid pages for the new process (in the basic block of the file)
+	nValidNo = 0;  
+	while (counter < 3) do
+		if([SCRATCHPAD + counter] != -1) then
+			nValidNo = nValidNo + 1;
+		endif;
+		counter = counter + 1;
+	endwhile;
+
+	//Check if necessary to return -1 when nValidNo > 3
+	if(nValidNo > 3) then
+		[physicalSP-2] = -1;
+		ireturn;
+	endif;
+
+	//counting the number of free pages from memory free list	
+	alias counter2 S7;
+	counter = 0;
+	counter2 = 0;
+	while (counter < 64) do
+		if([MEM_LIST + counter] == 0) then
+			counter2 = counter2 + 1;
+		endif;
+		counter = counter + 1;
+	endwhile;
+	
+	alias PageNo S6;
+
+	//checking if the current process has a page that is not shared by any other, so that, this can be used by exec process
+	if(counter2 < nValidNo) then
+		counter = 0;
+		while(counter < 4) do
+			if([PTBR + 2 * counter] != -1 && ([PTBR + 2 * counter + 1] == "01" || [PTBR + 2 * counter + 1] == "11")) then
+				PageNo = [PTBR + 2 * counter];
+				if([MEM_LIST + PageNo] == 1) then
+					counter2 = counter2 + 1;
+				endif;
+			endif;	
+			counter = counter + 1;
+		endwhile;
+		if(counter2 < nValidNo) then //return -1 if enough number of free pages are not available
+			[physicalSP - 2] = -1;
+			ireturn;
+		endif;
+	endif;
+
+	//decrementing the pages of current process and clear them if no other process refers it  
+	counter = 0;
+	while(counter < 4) do
+		if([PTBR + 2 * counter] != -1 && ([PTBR + 2 * counter + 1] == "01" || [PTBR + 2 * counter + 1] == "11")) then
+			PageNo = [PTBR + 2 * counter];
+			[MEM_LIST + PageNo] = [MEM_LIST + PageNo] - 1;
+			if([MEM_LIST + PageNo] == 0) then
+				counter2 = 0;
+				while(counter2 < 512) do
+					[PageNo * 512 + counter2] = "";
+					counter2 = counter2 + 1;
+				endwhile;
+			endif;
+		endif;
+		//if page is invaild and belongs to swap area
+		if([PTBR + 2 * counter] >= 448 && ([PTBR + 2 * counter + 1] == "00" || [PTBR + 2 * counter + 1] == "10")) then
+			PageNo = [PTBR + 2 * counter];
+			[DISK_LIST + PageNo] = [DISK_LIST + PageNo] - 1;
+			store(6,20);
+
+			//Free Disk Page if necessary ([DISK_LIST + PageNo] == 0)
+		
+		endif;
+		counter = counter + 1;
+	endwhile;
+
+	//setting all the entries of the page table with the disk block numbers and auxillary info as 00
+	counter = 0;
+	while(counter < 3 && [SCRATCHPAD + counter] != -1) do
+		[PTBR + 2 * counter] = [SCRATCHPAD + counter]; //putting up the disk block numbers 
+		[PTBR + 2 * counter + 1] = "00"; //auxillary info set as 00
+		counter = counter + 1;
+	endwhile;
+
+	counter2 = 0;
+	//finding a page for stack for the child pocess
+	while(counter2 < 64 && [MEM_LIST + counter2] != 0) do
+		counter2 = counter2 + 1;
+	endwhile;
+
+	//setting the page as used and "01"
+	[MEM_LIST + counter2] = 1;
+	[PTBR + 2*3] = counter2;
+	[PTBR + 2*3 + 1] = "01";
+
+	//closing all the open files of the current process
+	counter = 0;	
+	alias softIndex S9;
+	alias currentPID S10;				//Process ID of the current process
+	currentPID = (PTBR - 1024)/8;			//Each Per-process Page Table 8 words
+	alias currentPCB S11;
+	currentPCB = READY_LIST + 32 * currentPID;	//PCB for the Process
+
+	while(counter < 8) do
+		softIndex = [currentPCB + 15 + 2*counter];	//Pointer to SWOFT
+		if(softIndex != -1 && [FILE_TABLE + 2*softIndex] != -1) then
+			[FILE_TABLE + 2*softIndex + 1] = [FILE_TABLE + 2*softIndex + 1] - 1;
+			if ([FILE_TABLE + 2*softIndex + 1] == 0) then
+				[FILE_TABLE + 2*softIndex] = -1;		
+			endif;
+			[currentPCB + 15 + 2*counter] = -1;
+			[currentPCB + 15 + 2*counter + 1] = -1;	
+		endif;
+		counter = counter + 1;
+	endwhile;
+
+	//setting the IP of the new process
+	SP = 3*512;
+	physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+	[physicalSP] = 0;
+endif;
+
+if(sysCallNo == 11) then
+	[physicalSP - 2] = (PTBR - 1024)/8; //when does it return failure ?
+endif;
+
+if(sysCallNo == 12) then
+	alias pid S3;
+	pid = (PTBR -1024)/8;
+	[physicalSP - 2] = [READY_LIST + 32 * pid + 31];	
+endif;
+ireturn;

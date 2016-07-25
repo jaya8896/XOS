@@ -1,0 +1,35 @@
+load (7,1);   //exception handler
+load (8,2);   //
+
+load (23,17); //int 7
+load (24,18); //
+
+[READY_LIST + 0] = 0; //process1 id
+
+load (25,21); //init code
+load (26,22);
+load (27,23);
+
+PTBR = PAGE_TABLE;
+PTLR = 4;
+
+[PTBR + 0] = 25;
+[PTBR + 1] = "01";
+[PTBR + 2] = 26;
+[PTBR + 3] = "01";
+[PTBR + 4] = 27;
+[PTBR + 5] = "01";
+[PTBR + 6] = 28;
+[PTBR + 7] = "01";
+[READY_LIST + 1] = 2; //set running state
+
+SP = 3 * 512;         //stack start logical address, 4 page of process used for stack
+[28 * 512] = 0;	      //top of stack IP	
+
+load(11,5);    //interupt 1 routine
+load(12,6);
+
+load(9,3);     //timer interupt routine
+load(10,4);
+
+ireturn;

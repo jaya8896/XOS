@@ -1,0 +1,118 @@
+alias cause S0;
+cause = EFR % 10;
+
+alias VPagenum S1;
+VPagenum = (EFR / 10) % 100;
+
+alias IP_addr S2;
+IP_addr = (EFR / 1000);
+
+alias Exception S15;
+
+if (cause == 1) then
+	print "Illegal inst";
+	//Jump to Exit System Call
+	Exception = "Exception";
+	inline "JMP 11776";
+endif;
+
+if (cause == 2) then
+	print "Illegal Mem access";
+	//Jump to Exit System Call
+	Exception = "Exception";
+	inline "JMP 11776";
+endif;
+
+if (cause == 3) then
+	print "Arth Exception";
+	//Jump to Exit System Call
+	Exception = "Exception";
+	inline "JMP 11776";
+endif;
+
+if (cause == 4) then
+	print "Illegal operands";
+	//Jump to Exit System Call
+	Exception = "Exception";
+	inline "JMP 11776";
+endif;
+
+if (cause == 0) then
+	alias currentPID S4;
+	currentPID = (PTBR - 1024)/8;
+	if([PTBR + 8 * currentPID + 2 * VPagenum] == -1) then
+		//Jump to Exit System Call
+		Exception = "Exception";
+		inline "JMP 11776";
+	endif;
+	//Finding free page from memory list
+	alias counter S3;
+	counter = 0;
+	while (counter < 64 && [MEM_LIST + counter] != 0) do
+		counter = counter + 1;
+	endwhile; 
+	alias victimPage S5;
+	alias counter2 S6;
+	if (counter < 64) then
+		[MEM_LIST + counter] = 1;
+		victimPage = counter;
+	else
+		//No free Page Found
+		//Page Replacemenr
+		//Check in page table entry index for first value with reference bit as 0
+		print "inside this";
+		counter = 8 * currentPID + 2 * VPagenum;
+		//Setting counter to the page table entry which issued the page fault
+		//Search for a victim page to swap into the swap area and free a memory page
+		victimPage = [PAGE_TABLE + counter];
+		while ([PAGE_TABLE + counter + 1] != "01" && [MEM_LIST + victimPage] == 1) do 
+			if([PAGE_TABLE + counter + 1] == "11") then
+				[PAGE_TABLE + counter + 1] = "01";
+			endif;
+			if(counter == 254) then
+				counter = 0;
+			else
+				counter = counter + 2;
+				if((counter + 2) % 8 == 0) then
+					counter = counter + 2;
+				endif; 
+			endif;
+			victimPage = [PAGE_TABLE + counter];
+			print "/";
+			print victimPage;
+			print [PAGE_TABLE + counter + 1];
+			print "/";
+		endwhile;
+		victimPage = [PAGE_TABLE + counter];
+		counter2 = 448;
+		while (counter2 < 512 && [DISK_LIST + counter2] != 0) do
+			counter2 = counter2 + 1;
+		endwhile;
+		if (counter2 == 512) then
+			//Jump to Exit System Call
+			Exception = "Exception";
+			inline "JMP 11776";
+		endif;
+		store(victimPage, counter2);
+		[DISK_LIST + counter2] = [DISK_LIST + counter2] + 1;
+		[PAGE_TABLE + counter] = counter2;
+		[PAGE_TABLE + counter] = "00";
+	endif;
+	alias PhyPageNo S7;
+	PhyPageNo = [PTBR + 2 * VPagenum];
+	if(PhyPageNo >= 21 && PhyPageNo <= 447) then
+		load(victimPage, PhyPageNo);
+	endif;
+	if(PhyPageNo >= 448 && PhyPageNo <= 511) then
+		load(victimPage, PhyPageNo);
+		[DISK_LIST + PhyPageNo] = [DISK_LIST + PhyPageNo] - 1;
+	endif;
+	[PTBR + 2 * VPagenum] = victimPage;
+	[PTBR + 2 * VPagenum + 1] = "11";
+	store(6,20);
+	SP = SP + 1;
+	alias physicalSP S7;
+	physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512); //Physical Add of SP
+	[physicalSP] = IP_addr;
+endif;
+ireturn;

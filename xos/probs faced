@@ -1,0 +1,20 @@
+//for open system call we have only the file descriptor
+//we don't have the file name to create the file.
+
+//no function call and return in spl
+
+
+try Subroutine Instructions 
+The CALL instruction copies the address of the next instruction to be fetched on to location SP + 1. It also increments SP by one and transfers control to the instruction specified by the <target_address>. The address of the instruction to be fetched is in IP + 2 (each instruction is 2 memory words). The RET instruction restores the IP value stored at location pointed by SP, decrements SP by one and continues execution fetching the next instruction pointed to by IP. The subroutine instructions provide a neat mechanism for procedure invocations.
+
+CALL
+Syntax: CALL <target_address>
+Increments SP by 1, transfers IP + 2 to location pointed to by SP and jumps to instruction specified by <target_address>
+RET
+Syntax: RET
+Sets IP to the value pointed to by SP and decrements SP.
+
+
+only in xsm not in spl
+
+so have to work on it

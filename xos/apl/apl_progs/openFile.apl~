@@ -1,0 +1,22 @@
+integer main(){
+ integer status,status1,status2,status3;
+ string word;
+ status = Create("s7.dat");
+ status = Open("s7.dat");
+ print(status);
+ //status1 = Seek(status,11);
+ //print(status1);
+ //status3 = Read(status,word);
+ //status2 = Write(status,"chinna");
+ //status1 = Write(status,"chinnu");
+ //print(word);
+ 
+ //print(word);
+ status1 = Close(status);
+ //status1 = Delete("s7.dat");
+ print(status1);
+ //status1 = Create("s8.dat");
+ //status1 = Delete("s8.dat");
+ //print("s8.dat");
+ return 0;
+}

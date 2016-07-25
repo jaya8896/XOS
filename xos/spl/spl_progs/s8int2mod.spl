@@ -1,0 +1,135 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);  //get the physical address of the SP
+
+// Get system call no. from the stack and put it in a register
+alias sysCall S1;
+sysCall = [physicalSP-1];
+
+alias filename S2;
+filename = [physicalSP-3];
+
+if(sysCall == 2) then
+	alias fatEntry S5;
+	fatEntry = FAT;
+	while(fatEntry < DISK_LIST && [fatEntry] != filename) do
+		fatEntry = fatEntry + 8;
+	endwhile;
+	if(fatEntry >= DISK_LIST) then       //create file
+		alias basicBlock S4;
+		basicBlock = 3072+20;
+		while([basicBlock]!=0 && basicBlock<=3519) do
+			basicBlock = basicBlock +1;
+		endwhile;
+		if(basicBlock == 3520) then
+			[physicalSP-2] = -1;
+			ireturn;
+		else
+			alias fatEntry S5;
+			fatEntry = FAT;
+			while(fatEntry < DISK_LIST && [fatEntry] != filename) do
+				fatEntry = fatEntry + 8; 
+			endwhile;
+				fatEntry = FAT;
+				while(fatEntry < DISK_LIST && [fatEntry+2] != -1) do
+					fatEntry = fatEntry +8;
+				endwhile;
+				if(fatEntry == DISK_LIST) then
+					[physicalSP - 2] = -1;
+				else
+					[fatEntry] = filename;
+					[fatEntry + 1] = 0;
+					[fatEntry + 2] = basicBlock - 3072;
+					load(1,basicBlock-3072);
+					alias SPad S6;
+					SPad  = SCRATCHPAD;
+					while(SPad < SCRATCHPAD + 256) do
+						[SPad] = -1;
+						SPad = SPad + 1;
+					endwhile;
+					[basicBlock] = 1;
+					store(1,basicBlock-3072);
+					store(5,19);
+					store(6,20);
+					[physicalSP - 2] = 0;
+				endif;			
+		endif;	
+	endif;
+	alias fatIndex S6;
+	fatIndex = (fatEntry - FAT)/8;
+	//checking system wide open file table to check whether entry for file exists or not
+   	alias counter S15;
+   	counter = 0;
+   	while ( counter < 128 && [FILE_TABLE + counter] != fatIndex) do
+		counter = counter + 2;           //move to next entry 	
+	endwhile;	
+	//fatIndex found
+	if(counter < 128) then
+	   alias SWOFT S6;
+	   SWOFT = counter;
+	else
+	//if fatIndex not found   
+	counter = 0;
+	while ( counter < 128 && [FILE_TABLE + counter] != -1) do
+	   counter = counter + 2;           //move to next entry 	
+	endwhile;
+	endif;   
+	if ( counter >= 128 ) then
+	     [physicalSP - 2 ] = 0;
+	else
+	    
+	     alias currentPID S14;
+	     currentPID = (PTBR - 1024)/8;
+	     alias currentPCB S13;
+	     currentPCB = READY_LIST + 32 * currentPID;
+	     
+	     //seaching the per -process file table of current process for a free entry
+	     
+	     alias counter1 S11;
+	     counter1 = 15;
+	     while (counter1 < 31 && [currentPCB + counter1] != -1 ) do
+	       counter1 = counter1 + 2;
+	     endwhile;
+	     	if (counter1 >= 31 ) then 
+	        	[physicalSP - 2 ] = -1;
+	        	ireturn;
+	        else
+	        	[currentPCB + counter1 ] = S6; //setting it equal to SWOFT index
+	        	[currentPCB + counter1 + 1] = 0 ; //setting LSEEK position to 0;
+	        	[FILE_TABLE + counter] = fatIndex;
+	        	[FILE_TABLE + counter + 1] = [FILE_TABLE + counter + 1] + 1;
+	        	[physicalSP -2 ] = (counter1 - 15)/2 ;
+	        endif;
+	   
+	endif;
+endif;
+
+if(sysCall == 3) then      //close system call
+ alias fd S2;              //filedescriptor  as argument saved in register S2 
+ if(fd<0 || fd>7) then
+   	[physicalSP-2]=-1;
+ else
+ 	alias currentPID S14;
+	currentPID = (PTBR - 1024)/8;
+	alias currentPCB S13; 
+	currentPCB = 32 * currentPID;
+	if([currentPCB + 15 + 2 * fd] == -1) then
+	  [physicalSP -2] = -1;
+	else
+	  alias SWOFTEntry S12;
+	  SWOFTEntry = [currentPCB + 2* fd + 15];
+	  alias FileOpenCount S12; 
+	  FileOpenCount = FILE_TABLE + 2 * S12 + 1; 
+	  [FileOpenCount] = [FileOpenCount] - 1;
+	  if( [FileOpenCount] == 0) then
+	    [FileOpenCount-1] = -1;
+	  endif;
+	  [currentPCB + 15 + 2 * fd] = -1;
+	  [currentPCB + 15 + 2 * fd + 1] = -1;
+	  [physicalSP-2]=0;
+	  
+	endif;
+ endif;
+    
+endif;
+ireturn;
+

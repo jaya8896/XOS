@@ -1,0 +1,109 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512); //Physical Add of SP
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1]; 			//System Call No from the Stack
+
+if (sysCallNo == 8) then
+	alias PCBindex S2;
+	PCBindex = 0;
+	while (PCBindex < 32 && [READY_LIST + PCBindex*32 + 1] != 0) do	//Finding free PCB in ready list
+		PCBindex = PCBindex + 1;
+	endwhile;
+	if (PCBindex == 32) then		//If no PCB is free
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+	[READY_LIST + PCBindex*32] = PCBindex;	//Set the PID of the obtained PCB to PCBindex
+	alias counter S4;	//iterator constant
+	counter = 0;
+	
+	//Finding a free page for Child Stack
+	while (counter < 64 && [MEM_LIST + counter] != 0) do
+		counter = counter + 1;
+	endwhile;
+
+	//No free page found
+	if(counter == 64) then
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+
+	alias cStackPage S5;
+	cStackPage = counter;
+
+	[MEM_LIST + cStackPage] = 1;	//Marking the page in Memory List as Used
+
+	alias pStackPage S13;
+	pStackPage = [PTBR + 2*3];
+
+	//Copying Parent Stack Page to Child Stack Page
+	counter = 0;
+	while(counter < 512) do
+		[cStackPage * 512 + counter] = [pStackPage * 512 + counter];
+		counter = counter + 1;
+	endwhile;
+
+	alias childPTBR S6;		//PTBR of the child process
+	childPTBR = PAGE_TABLE + 8 * PCBindex;
+	
+	[childPTBR + 2*3] = cStackPage;	//Child's Page Table Stack Entry 
+	[childPTBR + 2*3 + 1] = "01";
+
+	alias ptEntry S7;		//Page Table entry counter
+	ptEntry = 0;
+	counter = 0;
+	alias tPageNo S9;		//Temporary Page Number
+	while (ptEntry < 3) do		//For each entry in Page Table of Parent process
+		[childPTBR + 2 * ptEntry] = [PTBR + 2 * ptEntry];	//Copy the entry into the child process Page Table
+		[childPTBR + 2 * ptEntry + 1] = [PTBR + 2 * ptEntry + 1];
+		//Check if a page is in swap area
+		if ([childPTBR + 2 * ptEntry] >= 448 &&([childPTBR + 2 * ptEntry + 1] == "01" || [childPTBR + 2 * ptEntry + 1] == "11")) then
+				tPageNo = [childPTBR + 2 * ptEntry];
+				[DISK_LIST + tPageNo] = [DISK_LIST + tPageNo] + 1;
+				store(6,20);
+		else //If a valid page increment the reference count in the memory free list
+			if ([childPTBR + 2 * ptEntry] != -1 &&([childPTBR + 2 * ptEntry + 1] == "01" || [childPTBR + 2 * ptEntry + 1] == "11")) then	
+				tPageNo = [childPTBR + 2 * ptEntry];
+				[MEM_LIST + tPageNo] = [MEM_LIST + tPageNo] + 1;
+			endif;
+		endif;
+		ptEntry = ptEntry + 1;
+	endwhile; 
+
+	[READY_LIST + PCBindex*32 + 5] = childPTBR;	//Set the PTBR of the child process to childPTBR in child PCB
+	[READY_LIST + PCBindex*32 + 6] = 4;		//Set the PTLR of the child process to 4 in child PCB
+	[READY_LIST + PCBindex*32 + 4] = [physicalSP];	//Set the IP of the child process to the top of the stack
+	[READY_LIST + PCBindex*32 + 3] = SP - 1;	//Set the SP of the child process to SP-1 (without IP ie., after IRET, IP is popped out of stack
+	[READY_LIST + PCBindex*32 + 2] = BP;
+	[READY_LIST + PCBindex*32 + 7] = R0;
+	[READY_LIST + PCBindex*32 + 8] = R1;
+	[READY_LIST + PCBindex*32 + 9] = R2;
+	[READY_LIST + PCBindex*32 + 10] = R3;
+	[READY_LIST + PCBindex*32 + 11] = R4;
+	[READY_LIST + PCBindex*32 + 12] = R5;
+	[READY_LIST + PCBindex*32 + 13] = R6;
+	[READY_LIST + PCBindex*32 + 14] = R7;
+	alias pPCBindex S10;		//Calculating parent process PCB index
+	alias SOFTindex S11;		//Calculating System Wide Open File Table index
+	pPCBindex = (PTBR - PAGE_TABLE)/8;	
+	counter = 15;
+	while (counter < 30) do
+		[READY_LIST + PCBindex*32 + counter] = [READY_LIST + pPCBindex*32 + counter];
+		[READY_LIST + PCBindex*32 + counter + 1] = [READY_LIST + pPCBindex*32 + counter + 1];
+		if ([READY_LIST + PCBindex*32 + counter] != -1) then		
+			SOFTindex = [READY_LIST + PCBindex*32 + counter];
+			[FILE_TABLE + 2*SOFTindex + 1] = [FILE_TABLE + 2*SOFTindex + 1] + 1;		
+		endif;
+		counter = counter + 2;			
+	endwhile;
+	[READY_LIST + PCBindex*32 + 1] = 1; 	//Set Child Process state to ready
+	[physicalSP -2] = PCBindex;		//Return Child Process ID to the parent process
+	alias cPhySP S12;		//Calculating Child Process physical Stack address
+	cPhySP = ([childPTBR + 2*((SP-1)/512)] * 512) + ((SP-1)%512);
+	[cPhySP - 1] = -2;
+	//Set Parent Process ID in the PCB of the child process
+	alias currentPID S13;				//Process ID of the current process
+	currentPID = (PTBR - 1024)/8;			//Each Per-process Page Table 8 words
+	[READY_LIST + PCBindex*32 + 31] = currentPID;	//Setting Parent Process ID for the child process
+endif;
+ireturn;

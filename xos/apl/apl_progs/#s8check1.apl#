@@ -1,0 +1,26 @@
+integer main(){
+	integer  steven,stodd,integer;
+	a = 1;
+	stodd = Create("a.dat"); 
+	steven = Create("b.dat");
+	if(stodd != -1 && steven != -1) then   //File successfully creates
+		stodd  = Open("a.dat");
+		steven = Open("b.dat");
+		if(stodd != -1 && steven != -1) then //Files succesfully opened
+			while(a<=5000)do
+				if(a%2!=0) then
+					status1 = Write(stodd,a);
+				else
+					status1 = Write(steven,a);
+				endif;
+				a = a + 1;
+			endwhile;
+		else
+			return 0;
+		endif;
+	else
+		return 0;
+	endif;
+	
+	
+}

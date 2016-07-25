@@ -1,0 +1,74 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2*(SP/512)] * 512) + (SP % 512);
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1];	//System Call No from the stack
+alias currentPID S6;				//Process ID of the current process
+currentPID = (PTBR - 1024)/8;			//Each Per-process Page Table 8 words
+alias currentPCB S7;
+currentPCB = READY_LIST + 32 * currentPID;	//PCB for the Process
+
+if (sysCallNo == 2) then	//Open System Call
+	alias fileName S2;
+	fileName = [physicalSP - 3];		//Arguement from the stack	
+	alias fatEntry S3;
+	fatEntry = FAT;
+	while ( fatEntry < DISK_LIST && [fatEntry] != fileName) do	//Search FAT Table in Memory			
+			fatEntry = fatEntry + 8;
+	endwhile;	
+	if(fatEntry == DISK_LIST) then					//File not found in Disk
+		[physicalSP - 2] = -1;					//Return Error -1			
+	else
+		alias fatIndex S4;					//Calculate FAT Index from FAT Entry
+		fatIndex = (fatEntry - FAT)/8;				//Each Entry is of 8 words
+		alias softIndex S5;					//Check whether the file is already open
+		softIndex = 0;						//Pointer to the entry in System Wide Open File Table
+		while (softIndex < 64 && [FILE_TABLE + 2*softIndex] != fatIndex) do		//Total 64 files can be opened at a time
+			//Each entry in System Wide Open Table is 2 words
+			softIndex = softIndex + 1;
+		endwhile;
+		if (softIndex == 64) then				//If no file with name is found, search for free
+			softIndex = 0;					//slot in the Sys Wide Open Tab
+			while (softIndex < 64 && [FILE_TABLE + 2*softIndex] != -1) do	//Free Entry Index = -1
+				softIndex = softIndex + 1;
+			endwhile;
+			if (softIndex == 64) then				//If no free entry is found
+				[physicalSP - 2] = -1;			//Return Value is -1 (Error)
+				ireturn;			
+			endif;
+		endif;			
+		alias ppftIndex S8;
+		ppftIndex = 15;					//Per-process page table index
+		while (ppftIndex < 31 && [currentPCB + ppftIndex] != -1) do
+			ppftIndex = ppftIndex + 2;		//Search for free entry in PPFT
+		endwhile;
+		if (ppftIndex == 31) then
+			[physicalSP - 2] = -1;			//Error no free entry found
+		else
+			[currentPCB + ppftIndex] = softIndex;	//Pointer to the new entry to the SOFT Index
+			[currentPCB + ppftIndex + 1] = 0;	//lseek position is 0 initially
+			[FILE_TABLE + 2*softIndex] = fatIndex;	//fatIndex in the entry of SOFT 
+			[FILE_TABLE + 2*softIndex + 1] = [FILE_TABLE + 2*softIndex + 1] + 1;
+								//Inc the value of File Open Count by 1				
+			ppftIndex = (ppftIndex - 15)/2;		//PPFT Index Calculation
+			[physicalSP - 2] = ppftIndex;		//Returns PPFT Index (fileDescriptor) on success		
+		endif; 
+	endif;	
+endif;
+if (sysCallNo == 3) then	//Close System Call
+	alias fileDesc S2;
+	fileDesc = [physicalSP - 3];		//Arguement from the stack
+	alias softIndex S3;
+	softIndex = [currentPCB + 15 + 2*fileDesc];	//Pointer to SWOFT
+	if (fileDesc < 0 || fileDesc > 7 || softIndex == -1 || [FILE_TABLE + 2*softIndex] == -1) then
+		[physicalSP - 2] = -1;
+	else
+		[FILE_TABLE + 2*softIndex + 1] = [FILE_TABLE + 2*softIndex + 1] - 1;
+		if ([FILE_TABLE + 2*softIndex + 1] == 0) then
+			[FILE_TABLE + 2*softIndex] = -1;		
+		endif;
+		[currentPCB + 15 + 2*fileDesc] = -1;
+		[currentPCB + 15 + 2*fileDesc + 1] = -1;
+		[physicalSP - 2] = 0;	
+	endif;	
+endif;
+ireturn;

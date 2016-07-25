@@ -1,0 +1,53 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512); //Physical Add of SP
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1]; 			//System Call No from the Stack
+alias currentPID S2;				//Process ID of the current process
+currentPID = (PTBR - 1024)/8;			//Each Per-process Page Table 8 words
+alias currentPCB S3;
+currentPCB = READY_LIST + 32 * currentPID;	//PCB for the Process
+alias fileDesc S4;
+fileDesc = [physicalSP - 4]; 			//Arguement from the Stack	
+alias softIndex S6;
+softIndex = [currentPCB + 2*fileDesc + 15];	//Pointer to SWOFT
+if (fileDesc < 0 || fileDesc > 7 || softIndex == -1 || [FILE_TABLE + 2*softIndex] == -1) then
+	[physicalSP - 2] = -1;
+	ireturn;
+endif;
+alias fatIndex S7;
+fatIndex = [FILE_TABLE + 2*softIndex];
+alias fileSize S8;
+fileSize = [FAT + 8 * fatIndex + 1];
+		
+if (sysCallNo == 6) then		//SEEK system call
+	alias newSeek S5;				//Arguements are in reverse order in the stack
+	newSeek = [physicalSP - 3];			//Arguement from the Stack
+	if (newSeek < 0 || newSeek > fileSize) then
+		[physicalSP - 2] = -1;
+		ireturn;	
+	endif;
+	[currentPCB + 15 + 2*fileDesc + 1] = newSeek;
+	[physicalSP - 2] = 0;		
+endif;
+if (sysCallNo == 7) then		//READ system call
+	alias readWord S5;				//Arguements are in reverse order in the stack
+	readWord = [physicalSP - 3];			//Arguement from the Stack
+	alias blockNo S9;
+	blockNo = [FAT + 8 * fatIndex + 2];
+	load (1,blockNo);
+	alias lSeek S10;
+	lSeek = [currentPCB + 15 + 2*fileDesc + 1];	//lSeek position of the file	
+	if (lSeek == fileSize) then
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+	alias dataNo S11;
+	dataNo = lSeek/512;
+	alias dataBlock S12;
+	dataBlock = [SCRATCHPAD + dataNo];
+	load (1,dataBlock);
+	[physicalSP - 3] = [SCRATCHPAD + (lSeek%512)];
+	[currentPCB + 15 + 2*fileDesc + 1] = [currentPCB + 15 + 2*fileDesc + 1] + 1;
+	[physicalSP - 2] = 0;				
+endif;
+ireturn;

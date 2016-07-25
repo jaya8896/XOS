@@ -1,0 +1,113 @@
+alias physicalSP S0; //Physical Address of SP
+physicalSP = ([PTBR + 2 * (SP/512)] * 512 ) + (SP % 512); 
+
+alias sysCall S1;
+sysCall = [physicalSP - 1]; //syscall no from stack
+
+if(sysCall == 8) then     //fork system call
+	alias PCBIndex S2;
+	PCBIndex = 0;
+	while(PCBIndex < 32 && [READY_LIST + 32 * PCBIndex + 1]!=0) do  //finding a free PCB
+		PCBIndex = PCBIndex + 1;
+	endwhile;
+	if(PCBIndex == 32) then                                    //if no free PCB is found
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+	[READY_LIST + 32 * PCBIndex] = PCBIndex;
+	alias counter S3;                                          
+	counter = 0;
+	alias PageCount S4;					   //counting the number of pages of valid pages of  Parent
+	PageCount = 0;
+	while(counter < 4) do                                      //as only four pages per process counter <4
+		if([PTBR + 2*counter] != -1) then
+			PageCount = PageCount + 1;
+		endif;
+		counter = counter + 1;
+	endwhile;
+	counter = 0;
+	alias FreePageNo S5;                                     
+	FreePageNo = 0;
+	while(counter < 64) do
+		if([MEM_LIST + counter]== 0) then                //checking whether enough number of pages available for child process
+			FreePageNo = FreePageNo + 1;
+			if(FreePageNo == PageCount) then
+				break;
+			endif;
+		endif;	
+		counter = counter + 1;
+	endwhile;
+	if(FreePageNo < PageCount)then				//failure in case of enough new pages not available for the child process
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+	alias childPTBR S6;					//calculating the childPTBR
+	childPTBR = PAGE_TABLE + 8 * PCBIndex;
+	alias PTEntry S7;					//PTEntry counter max 4 as each process has at max 4 pages
+	PTEntry = 0;
+	counter  = 0;
+	alias counter2 S8;					
+	alias TempPageNo S9;
+	while(PTEntry<4)do
+		while(counter<64 && [MEM_LIST + counter]!=0) do //finding the free page No from Memory free list	
+			counter = counter + 1;
+		endwhile;
+		[MEM_LIST + counter] = 1;			//on finding of a free page
+		if([PTBR + 2 * PTEntry] == -1) then		//if parent page in valid
+			[childPTBR + 2 * PTEntry] = [PTBR + 2 * PTEntry];
+			[childPTBR + 2 * PTEntry + 1] = [PTBR + 2 * PTEntry + 1];
+		else
+			[childPTBR + 2 * PTEntry] = counter;   //page table numbers
+			[childPTBR + 2 * PTEntry + 1] = [PTBR + 2 * PTEntry + 1]; //auxilary information
+			counter2 = 0;
+			while(counter2 < 512) do
+				TempPageNo = [PTBR + 2 * PTEntry]; //copying code content
+				[counter * 512 + counter2] = [TempPageNo * 512 + counter2];
+				counter2 = counter2 + 1; 
+			endwhile;
+		endif;
+		PTEntry = PTEntry + 1;
+	endwhile;
+	[READY_LIST + 32 * PCBIndex + 5] = childPTBR;  //setting  PTBR
+	alias currentPCB S10;
+	currentPCB = (PTBR - 1024)/8;
+	//[READY_LIST + 32 * PCBIndex + 4] = [READY_LIST + 32 * currentPCB + 4 ];    //setting IP
+	[READY_LIST + 32 * PCBIndex + 4] = [physicalSP]; //top of the stack is the IP
+	[READY_LIST + 32 * PCBIndex + 3] = SP - 1; //the stack pointer of child
+	[READY_LIST + 32 * PCBIndex + 2] = BP;
+	[READY_LIST + 32 * PCBIndex + 7] = R0;
+	[READY_LIST + 32 * PCBIndex + 8] = R1;
+	[READY_LIST + 32 * PCBIndex + 9] = R2;
+	[READY_LIST + 32 * PCBIndex + 10] = R3;
+	[READY_LIST + 32 * PCBIndex + 11] = R4;
+	[READY_LIST + 32 * PCBIndex + 12] = R5;
+	[READY_LIST + 32 * PCBIndex + 13] = R6;
+	[READY_LIST + 32 * PCBIndex + 14] = R7;
+	[READY_LIST + 32 * PCBIndex + 6] = 4;
+	
+	//per process file table of parent process copied to child process
+	alias child S11;
+	alias parent S12;
+	S11 = READY_LIST + 32 * PCBIndex;
+	S12 = READY_LIST + 32 * currentPCB;
+	alias counter3 S13;
+	alias SWOFTIndex S14;
+	counter = 15;
+	while(counter < 30) do
+		[child + counter] = [parent + counter];
+		[child + counter + 1] = [parent + counter + 1];
+		if([child + counter] != -1) then
+			SWOFTIndex = [child + counter];
+			[FILE_TABLE + 2 * SWOFTIndex + 1] = [FILE_TABLE + 2 * SWOFTIndex + 1] + 1;
+		endif;
+		counter = counter + 2;
+	endwhile;
+	//setting state of child to ready
+	[child + 1] = 1;
+	[physicalSP - 2] = PCBIndex; //returning child PID;
+	alias physicalSPChild S14;
+	physicalSPChild = ([childPTBR + 2 * ((SP-1)/512)] * 512 ) + ((SP-1) % 512);
+	[physicalSPChild - 1] = -2;
+	ireturn;
+endif;
+ireturn;

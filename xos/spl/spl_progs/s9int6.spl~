@@ -1,0 +1,144 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP/512)] * 512 ) + (SP % 512); 
+
+alias sysCall S1;
+sysCall = [physicalSP - 1];
+
+alias filename S2;
+filename = [physicalSP - 3];
+
+if(sysCall == 9) then			//exec system call
+	alias counter S3;
+	counter = 0;
+	while(counter<64 && [FAT + 8*counter]!=filename) do //check whether the filename exists in FAT or not
+		counter = counter + 1;
+	endwhile;
+	if(counter == 64) then
+		[physicalSP - 2] = -1;
+		ireturn;	
+	else
+		alias basicBlock S4;
+		basicBlock = [FAT + 8 * counter + 2];
+		load(1,basicBlock);
+		counter = 0;
+		alias count S5;                          //count of pages required by the new process
+		count = 0;
+		while(counter<256) do
+			if([SCRATCHPAD + count]!= -1) then
+				count = count + 1;
+			endif;
+			counter = counter + 1;
+		endwhile;
+		if(count > 3) then
+			[physicalSP - 2] = -1;
+			ireturn;
+		endif;
+		counter = 0;
+		alias currentProcessPages S6;		//count of pages of the current process				
+		currentProcessPages = 0;
+		alias counter2 S8;
+		while(counter<3) do			//no of text segments can be only 3
+			if([PTBR + 2 * counter]!= -1) then
+				currentProcessPages = currentProcessPages + 1;
+			endif;
+			counter = counter + 1;	
+		endwhile;
+		alias excess S7;
+		if(currentProcessPages>count) then
+			excess = currentProcessPages - count;
+			counter = 2;
+			breakpoint;
+			alias excess1 S13;
+			excess1 = excess;
+			while(excess1>0) do	
+				alias page S12;
+				page = [PTBR + 2 * counter];
+				[MEM_LIST + page] = 0;
+				[PTBR + 2 * counter] = -1;
+				[PTBR + 2 * counter + 1] = "00";
+				counter = counter - 1;
+				excess1 = excess1 - 1;
+			endwhile;
+		else                     
+			//count > currentPageProcess
+			counter = 29;
+			
+			counter2 = 0;
+			excess = count - currentProcessPages;                   
+			while(counter < 512) do                               //checking enough excess pages available
+				if([MEM_LIST + counter]==0) then
+					counter2 = counter2 + 1;
+					if(excess == counter2) then
+						break;
+					endif;	
+				endif;
+				counter = counter + 1;
+			endwhile;
+			if(excess>counter2) then			     //enough excess pages not available
+				[physicalSP -2] = -1;
+				ireturn;
+			endif;	
+			counter = 0;
+			counter2 = 0;
+			while(counter<512 && excess>0) do                  //if available then allocate in pagt table entries
+				if([MEM_LIST + counter]==0) then
+					[MEM_LIST + counter] = 1;
+					while(counter2 < 8 && [PTBR + 2 * counter2] != -1) do
+						counter2 = counter2 + 1;
+					endwhile;
+					[PTBR + 2 * counter2] = counter;
+					[PTBR + 2 * counter2 + 1] = "01";
+					excess = excess - 1;
+				endif;
+				counter = counter + 1;
+			endwhile;
+		endif;	
+			counter	= 0; //loading all block of code to pages as given in memory
+			counter2 = 0;
+			while(counter < count) do 
+				while(counter2 < 256 && [SCRATCHPAD + counter2] == -1) do
+					counter2 = counter2 + 1;
+				endwhile;
+				alias blockMM S15;
+				alias blockD S14;
+				blockMM = [PTBR + 2*counter];
+				blockD  = [SCRATCHPAD + counter2];
+				//print(blockD);
+				load(blockMM,blockD);
+				
+				counter = counter + 1;
+			endwhile;
+			
+			//closing all open files of the current process
+			alias currentPID S9;
+			currentPID = (PTBR - 1024) / 8;
+			
+			//closing all files opened by current process
+			counter = 15;
+			alias SWOFTIndex S10;
+			while(counter<30) do 
+				if([READY_LIST + 32 * currentPID + counter] != -1) then
+					SWOFTIndex = [READY_LIST + 32 * currentPID + counter];
+					if([FILE_TABLE + 2 * SWOFTIndex]!= -1 && [FILE_TABLE + 2 * SWOFTIndex + 1] != 1) then
+							[FILE_TABLE + 2 * SWOFTIndex + 1] = [FILE_TABLE + 2 * SWOFTIndex + 1] -1;
+					else
+						if([[FILE_TABLE + 2 * SWOFTIndex]!= -1 && [FILE_TABLE + 2 * SWOFTIndex + 1] == 1]) then
+							[FILE_TABLE + 2 * SWOFTIndex] = -1;
+							[FILE_TABLE + 2 * SWOFTIndex + 1] = 0;
+						endif;
+					endif;
+				endif;
+				counter = counter + 2;
+			endwhile;
+			//setting the stack pointer
+			SP = 3 * 512;
+			//the IP is set to 0(logical addressing)
+			physicalSP = ([PTBR + 2 * (SP/512)] * 512 ) + (SP % 512);
+			[physicalSP] = 0;
+			ireturn;
+		//endif;
+	endif;
+endif;
+
+if(sysCall == )
+

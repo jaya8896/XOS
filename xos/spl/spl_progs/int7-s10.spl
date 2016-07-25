@@ -1,0 +1,152 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512); //Physical Add of SP
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1]; 			//System Call No from the Stack
+
+if (sysCallNo == 13) then	//Wait System Call
+	alias waitingPID S2;
+	waitingPID = [physicalSP - 3]; //Arguement from the Stack
+	alias waitingPCB S3;
+	waitingPCB = READY_LIST + 32 * waitingPID;	//PCB for the Process
+	if([waitingPCB + 1] == 0 || [waitingPCB + 1] == 2) then	//If the process waiting for is in running or terminated state, return error -1
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+	alias currentPID S4;				//Process ID of the current process
+	currentPID = (PTBR - 1024)/8;			//Each Per-process Page Table 8 words
+	alias currentPCB S5;
+	currentPCB = READY_LIST + 32 * currentPID;	//PCB for the Process		
+	[currentPCB + 1] = 100 + waitingPID;	//Change to State of the current process to the waiting state 100 + waitingPID	
+	
+	//Context Switching for the waiting process
+	//set BP and SP of the current process
+	[currentPCB + 2] = BP;
+	[currentPCB + 3] = SP-1;
+
+	[currentPCB+4] = [physicalSP]; //set IP
+	[currentPCB+5] = PTBR;       //Set PTBR
+	[currentPCB+6] = PTLR;       //set PTLR
+
+	//setting R0 to R7 in PCB
+	[ currentPCB + 7 ] = R0;
+	[ currentPCB + 8 ] = R1;
+	[ currentPCB + 9 ] = R2;
+	[ currentPCB + 10 ] = R3;
+	[ currentPCB + 11 ] = R4;
+	[ currentPCB + 12 ] = R5;
+	[ currentPCB + 13 ] = R6;
+	[ currentPCB + 14 ] = R7;
+
+endif;
+
+if (sysCallNo == 10 || sysCallNo == 13 || S15 == "Exception") then	//Exit System Call
+	alias currentPID S2;				//Process ID of the current process
+	currentPID = (PTBR - 1024)/8;			//Each Per-process Page Table 8 words
+	alias currentPCB S3;
+	currentPCB = READY_LIST + 32 * currentPID;	//PCB for the Process
+	alias newPCB S4;
+	newPCB = currentPCB + 32;
+	alias waitingStat S9; 
+	waitingStat = 100 + currentPID;
+	if (sysCallNo == 10) then	//In Exit System call, resume all the processes waiting for the current process
+		while (newPCB != currentPCB) do
+			if ([newPCB + 1] == waitingStat) then
+				[newPCB + 1] = 1;
+			endif;
+			if(newPCB >= 2528) then
+				newPCB = 1536;
+			else
+				newPCB = newPCB + 32;
+			endif;
+		endwhile;	
+	endif;
+
+	newPCB = currentPCB + 32;
+	//Check all the PCBs until we get a process with ready state
+	while ([newPCB + 1] != 1 && newPCB != currentPCB) do
+		if(newPCB >= 2528) then
+			newPCB = 1536;
+		else
+			newPCB = newPCB + 32;
+		endif;
+	endwhile;
+	if(newPCB == currentPCB) then	//No other process in redy state
+		halt;
+		ireturn;
+	endif;
+	if (sysCallNo == 10 || S15 == "Exception") then	//Clearing the PCB and closing files if Exit System Call
+		alias softIndex S5;
+		alias counter S6;	//Iteration variable
+		counter = 0;	//Closing all files opened by the current process using fileDescriptors in per process open file table
+		while(counter < 8) do
+			softIndex = [currentPCB + 15 + 2*counter];	//Pointer to SWOFT
+			if(softIndex != -1 && [FILE_TABLE + 2*softIndex] != -1) then
+				[FILE_TABLE + 2*softIndex + 1] = [FILE_TABLE + 2*softIndex + 1] - 1;
+				if ([FILE_TABLE + 2*softIndex + 1] == 0) then
+					[FILE_TABLE + 2*softIndex] = -1;		
+				endif;
+				[currentPCB + 15 + 2*counter] = -1;
+				[currentPCB + 15 + 2*counter + 1] = -1;	
+			endif;
+			counter = counter + 1;
+		endwhile;
+		[currentPCB + 1] = 0;	//Set the state of the current executing process to o (termination)
+		counter = 0;		//Index to the page table entry of the current process
+		alias freePage S7;	//Temp variable to set a free page in memory free list	
+		while (counter < 4) do
+			freePage = [PTBR + 2*counter];
+			//Check if a page is in swap area
+			if ([PTBR + 2 * counter] >= 448 &&([PTBR + 2 * counter + 1] == "00" || [PTBR + 2 * counter + 1] == "10")) then
+					[DISK_LIST + freePage] = [DISK_LIST + freePage] - 1;
+					store(6,20);
+			endif; 
+			//If a valid page increment the reference count in the memory free list
+			if ([PTBR + 2 * counter] != -1 &&([PTBR + 2 * counter + 1] == "01" || [PTBR + 2 * counter + 1] == "11")) then	
+				[MEM_LIST + freePage] = [MEM_LIST + freePage] - 1;
+			endif;
+			
+			//Invalidating the entries in the page table of the current process			
+			[PTBR + 2*counter] = -1;
+			[PTBR + 2*counter + 1] = "00";
+			counter = counter + 1;
+		endwhile;
+	endif;
+	//Scheduling the new process for execution by loading the registers
+	BP = [newPCB + 2];
+	SP = [newPCB + 3];
+	PTBR = [newPCB + 5];
+	PTLR = [newPCB + 6];
+	R0 = [newPCB + 7];
+	R1 = [newPCB + 8];	
+	R2 = [newPCB + 9];
+	R3 = [newPCB + 10];
+	R4 = [newPCB + 11];
+	R5 = [newPCB + 12];
+	R6 = [newPCB + 13];
+	R7 = [newPCB + 14];
+	SP = SP + 1;
+	alias newphysicalSP S8;	//Calculating the physical address of the SP of the new Process
+	newphysicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512); 
+	[ newphysicalSP ] = [ newPCB + 4 ];	//Set the IP of the new process (on top of the stack) from its PCB
+	[newPCB + 1] = 2;	//Set the state of the current process to running		
+	S15 = "";
+endif;
+if (sysCallNo == 14) then
+	alias currentPID S2;				//Process ID of the current process
+	currentPID = (PTBR - 1024)/8;			//Each Per-process Page Table 8 words
+	alias currentPCB S3;
+	currentPCB = READY_LIST + 32 * currentPID;	//PCB for the Process
+	alias newPCB S4;
+	newPCB = currentPCB + 32;
+	while (newPCB != currentPCB) do
+		if ([newPCB + 1] == 100 + currentPID) then
+			[newPCB + 1] = 1;
+		endif;
+		if(newPCB >= 2528) then
+			newPCB = 1536;
+		else
+			newPCB = newPCB + 32;
+		endif;
+	endwhile;	
+endif;
+ireturn;

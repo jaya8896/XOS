@@ -1,0 +1,126 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);  //get the physical address of the SP
+
+// Get system call no. from the stack and put it in a register
+alias sysCall S1;
+sysCall = [physicalSP-1];
+
+alias filename S2;
+filename = [physicalSP-3];
+
+if ( sysCall == 1) then
+	// Implementation of Create 
+	
+	alias basicBlock S3;
+	//predefined constant DISK_LIST can also be used to get base address of disk free list in memory 
+	
+	basicBlock = 3072+20;           //finding the free basic block + 20 free blocks are from there only
+ 	
+	while([basicBlock]!=0 && basicBlock<=3519) do  //should be less than the swap area also
+	  basicBlock = basicBlock + 1;
+	endwhile; 
+	
+	if(basicBlock==3520) then      //means no free block
+	  [physicalSP-2] = -1;           // setting return value to -1(failure)
+	  ireturn;	
+	else
+	  alias fatEntry S4;           //checking whether filename already exists in the file allocation table
+	  fatEntry = FAT;
+	  while(fatEntry < DISK_LIST && [fatEntry] != filename) do
+		  fatEntry = fatEntry + 8;
+	  endwhile;
+	  if(fatEntry != DISK_LIST) then
+		[physicalSP-2] = 0;   //return success 0 , as file already exists	
+	  else
+		fatEntry = FAT;
+		while([fatEntry+2] != -1 && fatEntry<DISK_LIST) do //finding FATEntry with basic block value -1
+			fatEntry = fatEntry + 8;
+                endwhile;
+		if(fatEntry==DISK_LIST) then
+			[physicalSP-2] = -1;
+		else
+			[fatEntry]  = filename; //setting the fatEntry with argument filename, with size , with basicBlock No
+			[fatEntry+1]= 0;
+			[fatEntry+2]= basicBlock - 3072; //the logical number of the block when starting from 0
+ 			load(1,basicBlock-3072);    //to enter data into basicBlock , the block is loaded into scratchpad
+			alias SPad S6;
+			SPad = SCRATCHPAD; 
+			while(SPad < SCRATCHPAD + 256 )	 do  //only 256 bcz basicBlock of 512 words has 2 sections 0-255 datablock no, rest headers
+			   //writing the values of referred data blocks as -1 , because no file is empty and no data blocks are used \		
+			   [SPad] = -1;
+			   SPad = SPad + 1; 		
+			endwhile;
+			[basicBlock] = 1 ; //as the basicBlock is used for the new file , setting the basic Block as non empty
+			store(1,basicBlock-3072); //storing back the basicBlock content
+			
+			store(5,19); //store back FAT from memory to disk
+			store(6,20);
+			
+			[physicalSP-2] = 0; //setting return value as success
+                        
+		endif; 
+          endif;			
+	endif;
+
+	
+	
+endif;
+if ( sysCall == 4) then
+	// Implementation of Delete
+	alias fatEntry S15;
+	fatEntry = FAT;
+	while(fatEntry < DISK_LIST && [fatEntry] != filename) do
+		  fatEntry = fatEntry + 8;
+	endwhile;
+	//return -1 if filename doesn't exists if fat-table 
+	if(fatEntry == DISK_LIST) then
+	[physicalSP - 2] = -1;
+	else
+		alias counter S14;
+		counter = 0;
+		alias fatIndex S9;
+		fatIndex = [fatEntry - FAT]/8;
+		while ( counter < 128 && [FILE_TABLE + counter] != fatIndex) do
+			counter = counter + 2;           
+		endwhile;
+		if(counter < 128) then
+			[physicalSP - 2] = -1;
+		else
+			alias basicBlock S13;
+			basicBlock = [fatEntry + 2];
+			load(1,basicBlock);
+			alias SPad S12;
+			SPad = SCRATCHPAD;
+			while(SPad < SCRATCHPAD+256) do
+				if([SPad]!=-1)then
+				   alias datablock S9;
+				   datablock = [SPad];
+				   load(1,datablock);
+				   alias counter2 S11;
+				   counter2=0;
+				   while(counter2<512) do
+				      [SCRATCHPAD + counter2]="";
+				      counter2 = counter2 + 1;
+				   endwhile;
+				   store(1,datablock);
+				   [DISK_LIST + datablock]=0;
+				   load(1,basicBlock);
+				 endif;
+			         [SPad]="";
+				 SPad = SPad +1;
+			endwhile;
+			[DISK_LIST + basicBlock] = 0;
+			store(1,basicBlock);
+			[fatEntry + 0] = -1;
+			[fatEntry + 1] = 0;
+			[fatEntry + 2] = -1;
+			[physicalSP-2]=0;
+			store(5,19); //store back FAT from memory to disk
+			store(6,20);
+			
+		endif;  
+	
+	endif;
+	
+endif;	
+ireturn;

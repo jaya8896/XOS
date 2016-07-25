@@ -1,0 +1,56 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512); //Physical Address of SP
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1]; 			//System Call No 
+alias currentPID S2;				//Process ID of the current process
+currentPID = (PTBR - 1024)/8;			//Each Per-process Page Table 8 words
+alias currentPCB S3;
+currentPCB = READY_LIST + 32 * currentPID;	//PCB for the Process
+
+if (sysCallNo == 5) then				//WRITE system call
+	alias fileDesc S4;
+	fileDesc = [physicalSP - 4]; 			//Arguement from the Stack
+	alias writeWord S5;				//Arguements are in reverse order in the stack
+	writeWord = [physicalSP - 3];			//Arguement from the Stack
+	alias softIndex S6;
+	softIndex = [currentPCB + 2*fileDesc + 15];	//Pointer to SWOFT
+	alias lSeek S7;
+	lSeek = [currentPCB + 15 + 2*fileDesc + 1];	//lSeek position of the file	
+	if (fileDesc < 0 || fileDesc > 7 || softIndex == -1 || [FILE_TABLE + 2*softIndex] == -1) then //validity check
+		[physicalSP - 2] = -1;
+	else
+		alias fatIndex S8;
+		fatIndex = [FILE_TABLE + 2*softIndex];   //The FATIndex of file into which word is to be written
+		alias blockNo S9;
+		blockNo = [FAT + 8 * fatIndex + 2];      //basicblockNo of the file
+		load (1,blockNo);                        
+		alias dataNo S10;                        //datablockNo where word is to be written
+		dataNo = lSeek/512;
+		alias dataBlock S11;
+		dataBlock = [SCRATCHPAD + dataNo];        
+		if (dataBlock == -1) then
+			alias counter S12;
+			counter = 0;                     //finding a free block 
+			while (counter < 448 && [DISK_LIST + counter] != 0) do
+				counter = counter + 1;			
+			endwhile;
+			if (counter == 448) then         //case of no free block
+				[physicalSP - 2] = -1;
+				ireturn;			
+			endif;
+			[DISK_LIST + counter] = 1;      //changing the datablockNo if a block is found free in the basicBlock of the file
+			[SCRATCHPAD + dataNo] = counter;
+			dataBlock = counter;
+			store (1,blockNo);
+			[FAT + 8 * fatIndex + 1] = [FAT + 8 * fatIndex + 1] + 512; 		
+			store (5,19);
+			store (6,20);
+		endif;
+		load (1,dataBlock);
+		[SCRATCHPAD + (lSeek%512)] = writeWord; //writing the word at the offset
+		store (1,dataBlock);
+		[currentPCB + 15 + 2*fileDesc + 1] = [currentPCB + 15 + 2*fileDesc + 1] + 1; //incrementing the LSeek position by one
+		[physicalSP - 2] = 0;    //returning success		
+	endif;
+endif;
+ireturn;

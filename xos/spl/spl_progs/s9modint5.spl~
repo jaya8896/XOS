@@ -1,0 +1,124 @@
+alias physicalSP S0; //Physical Address of SP
+physicalSP = ([PTBR + 2 * (SP/512)] * 512 ) + (SP % 512); 
+
+alias sysCall S1;
+sysCall = [physicalSP - 1]; //syscall no from stack
+
+if(sysCall == 8) then     //fork system call
+	alias PCBIndex S2;
+	PCBIndex = 0;
+	while(PCBIndex < 32 && [READY_LIST + 32 * PCBIndex + 1]!=0) do  //finding a free PCB
+		PCBIndex = PCBIndex + 1;
+	endwhile;
+	if(PCBIndex == 32) then                                    //if no free PCB is found
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+	[READY_LIST + 32 * PCBIndex] = PCBIndex;
+	alias counter S3;                                          
+	counter = 0;
+	
+	//finding a free page for child stack
+	
+	while (counter<64 && [MEM_LIST + counter] != 0) do
+		counter = counter + 1;
+	endwhile;
+
+	//no free page found
+	if(counter == 64) then
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+
+	//free page found
+	alias ChildStackPage S4;
+	ChildStackPage = counter;
+	
+	//updating the memory free list
+	[MEM_LIST + ChildStackPage] = counter;
+
+	//copying the stack of parent to child
+
+	alias ParentStackPage S5;
+	ParentStackPage  = [PTBR + 2 * 3];
+	counter = 0;
+	while(counter < 512) do
+		[ChildStackPage * 512 + counter] = [ParentStackPage * 512 + counter];
+		counter = counter + 1;	
+	endwhile;
+
+	//finding the childPTBR	
+	alias childPTBR S6;
+	childPTBR = PAGE_TABLE + 8 * PCBIndex;
+	
+
+	//filling the stack page entry in page table
+
+	[childPTBR + 2 * 3] = ChildStackPage;
+	[childPTBR + 2 * 3 + 1] = '01'; //unreferenced and valid
+
+
+	//filling the child pagetable entries
+	
+	alias PageNo S7;
+	counter = 0;
+	while(counter<3) do
+		[childPTBR + 2 * counter] = [PTBR + 2 * counter];
+		[childPTBR + 2 * counter + 1] = [PTBR + 2 * counter + 1];
+		//if entry is a valid page
+		if ([childPTBR + 2 * counter] != -1 && ([childPTBR + 2 * counter + 1] == "01" || ([childPTBR + 2 * counter + 1] == "11"))) then //if valid page
+			PageNo = [childPTBR + 2 * counter];
+			[MEM_LIST + PageNo] = [MEM_LIST + PageNo] + 1; //incrementing the reference count in memory list
+		endif;		
+		if([childPTBR + 2 * counter]>=448 && ([childPTBR + 2 * counter + 1]== "00" || [childPTBR + 2 * counter + 1]== "10")) then //check for swap area
+			PageNo = [childPTBR + 2 * counter];
+			[DISK_LIST + PageNo] = [DISK_LIST + PageNo] + 1; //if it belongs to swap area
+			store(6,20); //storing back the disk free list 
+		endif;		
+		counter = counter + 1;
+	endwhile;
+
+	
+	[READY_LIST + 32 * PCBIndex + 5] = childPTBR;  //setting  PTBR
+	alias currentPCB S10;
+	currentPCB = (PTBR - 1024)/8;
+	//[READY_LIST + 32 * PCBIndex + 4] = [READY_LIST + 32 * currentPCB + 4 ];    //setting IP
+	[READY_LIST + 32 * PCBIndex + 4] = [physicalSP]; //top of the stack is the IP
+	[READY_LIST + 32 * PCBIndex + 3] = SP - 1; //the stack pointer of child
+	[READY_LIST + 32 * PCBIndex + 2] = BP;
+	[READY_LIST + 32 * PCBIndex + 7] = R0;
+	[READY_LIST + 32 * PCBIndex + 8] = R1;
+	[READY_LIST + 32 * PCBIndex + 9] = R2;
+	[READY_LIST + 32 * PCBIndex + 10] = R3;
+	[READY_LIST + 32 * PCBIndex + 11] = R4;
+	[READY_LIST + 32 * PCBIndex + 12] = R5;
+	[READY_LIST + 32 * PCBIndex + 13] = R6;
+	[READY_LIST + 32 * PCBIndex + 14] = R7;
+	[READY_LIST + 32 * PCBIndex + 6] = 4;
+	
+	//per process file table of parent process copied to child process
+	alias child S11;
+	alias parent S12;
+	child = READY_LIST + 32 * PCBIndex;
+	parent = READY_LIST + 32 * currentPCB;
+	alias counter3 S13;
+	alias SWOFTIndex S14;
+	counter = 15;
+	while(counter < 30) do
+		[child + counter] = [parent + counter];
+		[child + counter + 1] = [parent + counter + 1];
+		if([child + counter] != -1) then
+			SWOFTIndex = [child + counter];
+			[FILE_TABLE + 2 * SWOFTIndex + 1] = [FILE_TABLE + 2 * SWOFTIndex + 1] + 1;
+		endif;
+		counter = counter + 2;
+	endwhile;
+	//setting state of child to ready
+	[child + 1] = 1;
+	[physicalSP - 2] = PCBIndex; //returning child PID;
+	alias physicalSPChild S15;
+	physicalSPChild = ([childPTBR + 2 * ((SP-1)/512)] * 512 ) + ((SP-1) % 512);
+	[physicalSPChild - 1] = -2;
+	ireturn;
+endif;
+ireturn;

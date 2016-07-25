@@ -1,0 +1,96 @@
+load (7,1);   //exception handler
+load (8,2);   //
+
+load (23,17); //int 7
+load (24,18); //
+
+[READY_LIST + 0] = 0; //process1 id
+
+load (25,21); //init code
+load (26,22);
+load (27,23);
+
+PTBR = PAGE_TABLE;
+PTLR = 4;
+
+[PTBR + 0] = 25;     //init process in page_table
+[PTBR + 1] = "01";
+[PTBR + 2] = 26;
+[PTBR + 3] = "00";
+[PTBR + 4] = 27;
+[PTBR + 5] = "00";
+[PTBR + 6] = 28;
+[PTBR + 7] = "01";
+[READY_LIST + 1] = 2; //set running state
+
+SP = 3 * 512;         //stack start logical address, 4 page of process used for stack
+[28 * 512] = 0;	      //top of stack IP	
+
+load(11,5);    //interupt 1 routine
+load(12,6);
+
+load(9,3);     //timer interupt routine
+load(10,4);
+
+load(5,19);	//load FAT to memory page 5 from disk block 19
+load(6,20);	//load disk free list to memory page 
+
+
+load(13,7); //loading interuppt routine 2   
+load(14,8);
+
+load(15,9); //loading interuppt routine 3   
+load(16,10);
+
+load(17,11); //loading interuppt routine 4
+load(18,12);
+
+load(19,13); //loading interuppt routine 5
+load(20,14);
+
+load(21,15); //loading interuppt routine 6
+load(22,16);
+
+load(23,17); //loading interuppt routine 7
+load(24,18);
+
+//marking the pages 0-24 and 25-28 as marked in memory free list
+alias counter S0;
+counter = 0;
+while(counter<=28) do
+   [MEM_LIST + counter] = 1;
+   counter = counter+1;
+endwhile;
+
+//setting rest to unused pages
+while(counter<=63) do
+   [MEM_LIST + counter] = 0;
+   counter = counter + 1;
+endwhile;
+
+//setting states of PCB as free (except that of init process)
+counter = 1;
+while (counter<32) do
+  [READY_LIST + 32 * counter + 1] = 0;
+  counter = counter + 1;
+endwhile;
+
+//setting all the entries in the system wide open file table invalid initially
+
+counter = 0;
+while ( counter < 128 ) do
+	[FILE_TABLE + counter] = -1;     //set FAT INDEX -1
+	[FILE_TABLE + counter + 1] = 0;  //set file open count as 0
+	counter = counter + 2;           //move to next entry 	
+endwhile;
+
+//setting the per-process open file table entries of the init process invaild
+
+counter = 15;
+while(counter<31) do
+ [READY_LIST + counter ] = -1; //set pointer to system wide open file table entry as -1
+ [READY_LIST + counter + 1 ] = -1 ; //setting LSEEK position of the file opened to be -1
+ counter = counter + 2;
+endwhile;
+
+ireturn;
